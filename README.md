@@ -36,7 +36,7 @@ BS_APP_PASSWORD_2=
 BS_ACCOUNT_COUNT=3
 
 # ストリーム、Blueskyアカウント、テキストの紐付け
-STREAM_0="LISTEN_TIMELINEに加えてここで指定したID@host形式のタイムラインが含まれる場合に投稿先やテキストを置き換えることが出来る"
+STREAM_0="LISTEN_TIMELINEに加えてここで指定したID@host形式のタイムラインが含まれる場合に投稿先の切替やテキストの置き換えなどが出来る"
 BS_ACCOUNT_0=0
 OVERRIDE_TEXT_0="Bluesky特有の定型文やハッシュタグで画像付き投稿のテキストを置き換える場合に指定"
 MODERATION_LABEL_0="" # porn,sexual,nudity,nsfl,gore から、このアカウントの画像投稿に対するラベルを指定
