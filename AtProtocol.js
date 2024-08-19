@@ -14,7 +14,7 @@ class AtProtocol {
         })
     }
 
-    async post(text, filesBuffer) {
+    async post(text, filesBuffer, label) {  // label パラメータを追加
         const images = await this.uploadMedia(filesBuffer)
 
         const rt = new at.RichText({
@@ -36,6 +36,14 @@ class AtProtocol {
                 $type: 'app.bsky.embed.images',
                 images: images
             }
+        }
+
+        // labelが指定されていればself-labelを追加
+        if (label) {
+            record.labels = {
+                $type: 'com.atproto.label.defs#selfLabels',
+                values: [{ val: label }]
+            };
         }
 
         await this.agent.post(record)
