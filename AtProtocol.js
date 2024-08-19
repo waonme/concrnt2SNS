@@ -51,6 +51,9 @@ class AtProtocol {
     
 
     async uploadMedia(filesBuffer) {
+        if (!filesBuffer) {
+            return [];
+        }
         const maxRetries = 3;  // 再試行回数
         let attempts = 0;
     
