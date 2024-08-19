@@ -1,4 +1,4 @@
-require('dotenv').config();  // .env ファイルから環境変数を読み込む
+require('dotenv').config();
 
 const cc = require('@concurrent-world/client');
 const ImageResize = require('./Image.js');
@@ -135,9 +135,8 @@ function receivedPost(data) {
                 moderationLabel = 'gore';
             }
         }
-
-        // ストリームに基づくチェック（summaryタグによるラベルが未設定の場合のみ）
-        if (!moderationLabel) {  // 既にsummaryで設定されたラベルがある場合は上書きしない
+        // メディアが存在する場合のみ、ストリームに基づくチェックを実行
+        if (files.length > 0 && !moderationLabel) {
             relatedTimelines.forEach(timeline => {
                 if (streamClientMapping[timeline]) {
                     selectedClient = streamClientMapping[timeline].client;
@@ -150,17 +149,34 @@ function receivedPost(data) {
                 }
             });
         }
+    // moderationLabelが配列の場合、最初の要素を使用する
+    if (Array.isArray(moderationLabel)) {
+        moderationLabel = moderationLabel[0];
+    }
 
         if (selectedClient && (selectedText.length > 0 || files.length > 0)) {
             image.downloader(files).then(filesBuffer => {
                 if (TW_ENABLE) twitterClient.tweet(selectedText, filesBuffer);
 
                 if (BS_ENABLE && selectedClient) {
-                    selectedClient.post(selectedText, filesBuffer, moderationLabel);  // ラベルを指定して投稿
+                    try {
+                        if (files.length > 0) {
+                            // メディアファイルが存在する場合、moderationLabelを指定して投稿
+                            selectedClient.post(selectedText, filesBuffer, moderationLabel);
+                        } else {
+                            // メディアファイルが存在しない場合、moderationLabelを指定せずに投稿
+                            selectedClient.post(selectedText, null, null);
+                        }
+                    } catch (error) {
+                        console.error("Error during posting to Bluesky:", error);
+                    }
                 }
+            }).catch(error => {
+                console.error("Error during image downloading:", error);
             });
         }
     }
 }
+
 
 start()
