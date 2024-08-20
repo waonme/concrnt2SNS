@@ -38,7 +38,7 @@ Object.keys(process.env).forEach(key => {
         const appPassword = process.env[`${bsPasswordPrefix}${index}`];
         if (identifier && appPassword && BS_SERVICE) {
             try {
-                bskyClients[index] = new AtProtocol(identifier, appPassword);
+                bskyClients[index] = new AtProtocol(BS_SERVICE, identifier, appPassword);
                 console.log(`Bluesky client created for account ${index} with identifier ${identifier}`);
             } catch (error) {
                 console.error(`Failed to initialize Bluesky client for account ${index}:`, error);
@@ -91,11 +91,13 @@ async function start() {
     const listenTimeline = LISTEN_TIMELINE || client.user.homeTimeline;
 
     subscription.on('MessageCreated', (message) => {
+        console.log('Message received:', message);  // メッセージ受信のログ
         if (message.document.signer != client.ccid) {
             return;
         }
         receivedPost(message);
     });
+    
 
     subscription.listen([listenTimeline]);
 }
@@ -103,8 +105,12 @@ async function start() {
 function receivedPost(data) {
     if (data.document.schema == "https://schema.concrnt.world/m/markdown.json" || data.document.schema == "https://schema.concrnt.world/m/media.json") {
         const body = data.document.body.body;
-        let text = ccMsgAnalysis.getPlaneText(body);
+        const text = ccMsgAnalysis.getPlaneText(body);
+        console.log('Extracted text:', text);  // テキストが正しく抽出されているかを確認
+        
         const files = ccMsgAnalysis.getMediaFiles(body);
+        console.log('Extracted files:', files);  // メディアファイルが正しく抽出されているかを確認
+        
 
         data.document.body.medias?.forEach(media => {
             files.push({
@@ -136,11 +142,11 @@ function receivedPost(data) {
             }
         }
 
-        // メディアが存在する場合のみ、ストリームに基づくチェックを実行
-        if (files.length > 0 && !moderationLabel) {
+        // タイムラインごとにクライアントを選択
             relatedTimelines.forEach(timeline => {
                 if (timelineClientMapping[timeline]) {
                     selectedClient = timelineClientMapping[timeline].client;
+                    console.log(`Selected client for timeline ${timeline}:`, selectedClient);
                     if (timelineClientMapping[timeline].overrideText !== undefined) {
                         selectedText = timelineClientMapping[timeline].overrideText;
                     }
@@ -149,7 +155,7 @@ function receivedPost(data) {
                     }
                 }
             });
-        }
+
 
         // moderationLabelが配列の場合、最初の要素を使用する
         if (Array.isArray(moderationLabel)) {
@@ -163,12 +169,15 @@ function receivedPost(data) {
                 if (BS_ENABLE && selectedClient) {
                     try {
                         if (files.length > 0) {
+                            console.log('Posting with media:', text);  // メディアありの投稿ログ
                             // メディアファイルが存在する場合、moderationLabelを指定して投稿
                             selectedClient.post(selectedText, filesBuffer, moderationLabel);
                         } else {
+                            console.log('Posting without media:', text);  // メディアなしの投稿ログ
                             // メディアファイルが存在しない場合、moderationLabelを指定せずに投稿
                             selectedClient.post(selectedText, null, null);
                         }
+                        console.log('Post successfully made to Bluesky:', text);  // 成功時のログ
                     } catch (error) {
                         console.error("Error during posting to Bluesky:", error);
                     }
@@ -176,6 +185,8 @@ function receivedPost(data) {
             }).catch(error => {
                 console.error("Error during image downloading:", error);
             });
+        } else {
+            console.log('No selectedClient or content to post');  // クライアントが選択されていない、または投稿するコンテンツがない場合のログ
         }
     }
 }
