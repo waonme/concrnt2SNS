@@ -36,7 +36,7 @@ Object.keys(process.env).forEach(key => {
         const index = key.replace(bsAccountPrefix, '');
         const identifier = process.env[`${bsAccountPrefix}${index}`];
         const appPassword = process.env[`${bsPasswordPrefix}${index}`];
-        if (identifier && appPassword) {
+        if (identifier && appPassword && BS_SERVICE) {
             try {
                 bskyClients[index] = new AtProtocol(identifier, appPassword);
                 console.log(`Bluesky client created for account ${index} with identifier ${identifier}`);
