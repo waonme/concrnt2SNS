@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const cc = require('@concurrent-world/client');
 const ImageResize = require('./Image.js');
 const Twitter = require('./Twitter.js');
@@ -11,7 +9,6 @@ const CC_SUBKEY = process.env.CC_SUBKEY;
 const TW_ENABLE = process.env.TW_ENABLE == "true";
 const TW_API_KEY = process.env.TW_API_KEY;
 const TW_API_KEY_SECRET = process.env.TW_API_KEY_SECRET;
-
 const TW_ACCESS_TOKEN = process.env.TW_ACCESS_TOKEN;
 const TW_ACCESS_TOKEN_SECRET = process.env.TW_ACCESS_TOKEN_SECRET;
 
@@ -25,59 +22,67 @@ const twitterClient = TW_ENABLE && new Twitter(TW_API_KEY, TW_API_KEY_SECRET, TW
 const ccMsgAnalysis = new CCMsgAnalysis();
 
 // 環境変数の検証
-if (!process.env.BS_SERVICE) {
+if (!BS_SERVICE) {
     console.error('BS_SERVICE is not defined in .env');
     process.exit(1);
 }
 
-const isDevelopment = process.env.NODE_ENV === 'development';
+// Blueskyクライアントの動的生成
 const bskyClients = {};
-
-if (isDevelopment) {
-    if (!process.env.BS_IDENTIFIER_DEV || !process.env.BS_APP_PASSWORD_DEV) {
-        console.error('Development Bluesky account is not properly configured');
-        process.exit(1);
-    }
-    bskyClients['DEV'] = new AtProtocol(BS_SERVICE, process.env.BS_IDENTIFIER_DEV, process.env.BS_APP_PASSWORD_DEV);
-} else {
-    const bsAccountCount = parseInt(process.env.BS_ACCOUNT_COUNT, 10) || 0;
-    for (let i = 0; i < bsAccountCount; i++) {
-        const identifier = process.env[`BS_IDENTIFIER_${i}`];
-        const password = process.env[`BS_APP_PASSWORD_${i}`];
-        if (identifier && password) {
-            bskyClients[i] = new AtProtocol(BS_SERVICE, identifier, password);
+const bsAccountPrefix = 'BS_IDENTIFIER_';
+const bsPasswordPrefix = 'BS_APP_PASSWORD_';
+Object.keys(process.env).forEach(key => {
+    if (key.startsWith(bsAccountPrefix)) {
+        const index = key.replace(bsAccountPrefix, '');
+        const identifier = process.env[`${bsAccountPrefix}${index}`];
+        const appPassword = process.env[`${bsPasswordPrefix}${index}`];
+        if (identifier && appPassword) {
+            try {
+                bskyClients[index] = new AtProtocol(identifier, appPassword);
+                console.log(`Bluesky client created for account ${index} with identifier ${identifier}`);
+            } catch (error) {
+                console.error(`Failed to initialize Bluesky client for account ${index}:`, error);
+                if (error.message.includes('fetch failed')) {
+                    console.error('Network error: Unable to connect to the Bluesky API. Please check your network connection and the API endpoint.');
+                }
+            }            
         } else {
-            console.error(`Bluesky account ${i} is not properly configured`);
-            process.exit(1);
+            console.warn(`Identifier or password missing for account ${index}`);
         }
     }
-}
+});
+
+
 
 // ストリームとBlueskyアカウントの紐付けを環境ごとに設定
-const streamClientMapping = {};
-const streamPrefix = isDevelopment ? 'STREAM_DEV_' : 'STREAM_';
-const bsAccountPrefix = isDevelopment ? 'BS_ACCOUNT_DEV_' : 'BS_ACCOUNT_';
-const overrideTextPrefix = isDevelopment ? 'OVERRIDE_TEXT_DEV_' : 'OVERRIDE_TEXT_';
-const moderationLabelPrefix = isDevelopment ? 'MODERATION_LABEL_DEV_' : 'MODERATION_LABEL_';
+const timelineClientMapping = {};
+const timelinePrefix = 'TIMELINE_';
+const bsAccountMappingPrefix = 'BS_ACCOUNT_';
+const overrideTextPrefix = 'OVERRIDE_TEXT_';
+const moderationLabelPrefix = 'MODERATION_LABEL_';
 
-const mappingCount = isDevelopment ? Object.keys(process.env).filter(key => key.startsWith('STREAM_DEV_')).length : bsAccountCount;
+Object.keys(process.env).forEach(key => {
+    if (key.startsWith(timelinePrefix)) {
+        const index = key.replace(timelinePrefix, '');
+        const timeline = process.env[`${timelinePrefix}${index}`];
+        const accountIndex = parseInt(process.env[`${bsAccountMappingPrefix}${index}`], 10);
+        const overrideText = process.env[`${overrideTextPrefix}${index}`];
+        const moderationLabel = process.env[`${moderationLabelPrefix}${index}`];
 
-for (let i = 0; i < mappingCount; i++) {
-    const stream = process.env[`${streamPrefix}${i}`];
-    const accountKey = process.env[`${bsAccountPrefix}${i}`];
-    const overrideText = process.env[`${overrideTextPrefix}${i}`];
-    const moderationLabel = process.env[`${moderationLabelPrefix}${i}`];
-
-    if (stream && accountKey && bskyClients[accountKey]) {
-        streamClientMapping[stream] = {
-            client: bskyClients[accountKey],
-            overrideText: overrideText || undefined,
-            moderationLabel: moderationLabel ? moderationLabel.split(',') : undefined  // 複数のラベル対応
-        };
-    } else {
-        console.warn(`Stream ${stream} or associated account ${accountKey} is not properly configured`);
+        if (timeline && !isNaN(accountIndex) && bskyClients[accountIndex]) {
+            timelineClientMapping[timeline] = {
+                client: bskyClients[accountIndex],
+                overrideText: overrideText || undefined,
+                moderationLabel: moderationLabel ? moderationLabel.split(',') : undefined
+            };
+            console.log(`Timeline ${timeline} is mapped to Bluesky account ${accountIndex}`);
+        } else {
+            console.warn(`Failed to map timeline ${timeline}. Timeline: ${timeline}, accountIndex: ${accountIndex}, valid client: ${!!bskyClients[accountIndex]}`);
+        }
     }
-}
+});
+
+
 
 async function start() {
     const client = await cc.Client.createFromSubkey(CC_SUBKEY);
@@ -96,11 +101,6 @@ async function start() {
 }
 
 function receivedPost(data) {
-    // 開発モードの時のみログ出力
-    if (isDevelopment) {
-        console.log("Received data from Concrnt:", JSON.stringify(data, null, 2));
-    }
-
     if (data.document.schema == "https://schema.concrnt.world/m/markdown.json" || data.document.schema == "https://schema.concrnt.world/m/media.json") {
         const body = data.document.body.body;
         let text = ccMsgAnalysis.getPlaneText(body);
@@ -114,9 +114,9 @@ function receivedPost(data) {
         });
 
         const relatedTimelines = data.document.timelines || [];
-        let selectedClient = isDevelopment ? bskyClients['DEV'] : null;
         let selectedText = text;
         let moderationLabel = undefined;
+        let selectedClient;
 
         // <summary>タグの内容を正規表現で検出してラベルを設定
         const summaryMatch = body.match(/<summary>(.*?)<\/summary>/i);
@@ -135,24 +135,26 @@ function receivedPost(data) {
                 moderationLabel = 'gore';
             }
         }
+
         // メディアが存在する場合のみ、ストリームに基づくチェックを実行
         if (files.length > 0 && !moderationLabel) {
             relatedTimelines.forEach(timeline => {
-                if (streamClientMapping[timeline]) {
-                    selectedClient = streamClientMapping[timeline].client;
-                    if (streamClientMapping[timeline].overrideText !== undefined) {
-                        selectedText = streamClientMapping[timeline].overrideText;
+                if (timelineClientMapping[timeline]) {
+                    selectedClient = timelineClientMapping[timeline].client;
+                    if (timelineClientMapping[timeline].overrideText !== undefined) {
+                        selectedText = timelineClientMapping[timeline].overrideText;
                     }
-                    if (streamClientMapping[timeline].moderationLabel) {
-                        moderationLabel = streamClientMapping[timeline].moderationLabel;
+                    if (timelineClientMapping[timeline].moderationLabel) {
+                        moderationLabel = timelineClientMapping[timeline].moderationLabel;
                     }
                 }
             });
         }
-    // moderationLabelが配列の場合、最初の要素を使用する
-    if (Array.isArray(moderationLabel)) {
-        moderationLabel = moderationLabel[0];
-    }
+
+        // moderationLabelが配列の場合、最初の要素を使用する
+        if (Array.isArray(moderationLabel)) {
+            moderationLabel = moderationLabel[0];
+        }
 
         if (selectedClient && (selectedText.length > 0 || files.length > 0)) {
             image.downloader(files).then(filesBuffer => {
@@ -177,6 +179,5 @@ function receivedPost(data) {
         }
     }
 }
-
 
 start()

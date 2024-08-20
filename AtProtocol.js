@@ -1,20 +1,26 @@
 const at = require('@atproto/api')
 
 class AtProtocol {
-    constructor(service, Identifier, appPassword) {
-        this.agent = new at.BskyAgent({
-            service: service
-        })
-
+    constructor(service, identifier, appPassword) {
+        this.agent = new at.BskyAgent({ service });
+        
+        this.loginSuccess = false;
         this.agent.login({
-            identifier: Identifier,
+            identifier: identifier,
             password: appPassword
         }).then(res => {
-            console.log(`BS Login : ${res}`)
-        })
+            console.log(`BS Login successful: ${identifier}`);
+            this.loginSuccess = true;
+        }).catch(err => {
+            console.error(`BS Login failed for ${identifier}:`, err);
+        });
     }
 
-    async post(text, filesBuffer, label) {  // label パラメータを追加
+    async post(text, filesBuffer, label) {
+        if (!this.loginSuccess) {
+            console.error("Cannot post: not logged in");
+            return;
+        }
         const images = await this.uploadMedia(filesBuffer)
     
         const rt = new at.RichText({
@@ -54,39 +60,34 @@ class AtProtocol {
         if (!filesBuffer) {
             return [];
         }
-        const maxRetries = 3;  // 再試行回数
+        const maxRetries = 3;
         let attempts = 0;
     
         while (attempts < maxRetries) {
             try {
-                return await Promise.all(filesBuffer.filter((file) => file.type.indexOf("image") >= 0).map(async (file) => {
+                return await Promise.all(filesBuffer.filter(file => file.type.indexOf("image") >= 0).map(async (file) => {
                     const result = await this.agent.uploadBlob(
                         file.uint8Array,
-                        {
-                            encoding: file.type,
-                        }
+                        { encoding: file.type }
                     );
     
                     return {
                         alt: "",
                         image: result.data.blob,
-                        aspectRatio: {
-                            width: 3,
-                            height: 2
-                        }
+                        aspectRatio: { width: 3, height: 2 }
                     };
                 }));
             } catch (error) {
                 attempts++;
                 if (attempts >= maxRetries) {
                     console.error('Upload failed after maximum retries:', error);
-                    throw error;  // 最大試行回数を超えた場合、エラーを投げる
+                    throw error;
                 } else {
                     console.warn(`Upload attempt ${attempts} failed, retrying...`);
                 }
             }
         }
-    }
+    }    
 }
 
 module.exports = AtProtocol
