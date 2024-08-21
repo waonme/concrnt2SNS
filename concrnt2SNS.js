@@ -111,7 +111,6 @@ function receivedPost(data) {
         const files = ccMsgAnalysis.getMediaFiles(body);
         console.log('Extracted files:', files);  // メディアファイルが正しく抽出されているかを確認
         
-
         data.document.body.medias?.forEach(media => {
             files.push({
                 url: media.mediaURL,
@@ -121,14 +120,13 @@ function receivedPost(data) {
 
         const relatedTimelines = data.document.timelines || [];
         let selectedText = text;
-        let moderationLabel = undefined;
-        let selectedClient;
+        let moderationLabel;
+        let selectedClient = bskyClients[0]; // デフォルトは BS_ACCOUNT_0
 
         // <summary>タグの内容を正規表現で検出してラベルを設定
         const summaryMatch = body.match(/<summary>(.*?)<\/summary>/i);
         if (summaryMatch) {
             const summaryContent = summaryMatch[1].toLowerCase();  // 小文字に変換して統一
-
             if (summaryContent.includes('porn')) {
                 moderationLabel = 'porn';
             } else if (summaryContent.includes('sexual') || summaryContent.includes('suggestive')) {
@@ -143,19 +141,18 @@ function receivedPost(data) {
         }
 
         // タイムラインごとにクライアントを選択
-            relatedTimelines.forEach(timeline => {
-                if (timelineClientMapping[timeline]) {
-                    selectedClient = timelineClientMapping[timeline].client;
-                    console.log(`Selected client for timeline ${timeline}:`, selectedClient);
-                    if (timelineClientMapping[timeline].overrideText !== undefined) {
-                        selectedText = timelineClientMapping[timeline].overrideText;
-                    }
-                    if (timelineClientMapping[timeline].moderationLabel) {
-                        moderationLabel = timelineClientMapping[timeline].moderationLabel;
-                    }
+        relatedTimelines.forEach(timeline => {
+            if (timelineClientMapping[timeline]) {
+                selectedClient = timelineClientMapping[timeline].client; // 他のタイムラインがあれば、そのクライアントに切り替え
+                console.log(`Selected client for timeline ${timeline}:`, selectedClient);
+                if (timelineClientMapping[timeline].overrideText !== undefined) {
+                    selectedText = timelineClientMapping[timeline].overrideText;
                 }
-            });
-
+                if (timelineClientMapping[timeline].moderationLabel) {
+                    moderationLabel = timelineClientMapping[timeline].moderationLabel;
+                }
+            }
+        });
 
         // moderationLabelが配列の場合、最初の要素を使用する
         if (Array.isArray(moderationLabel)) {
@@ -169,15 +166,13 @@ function receivedPost(data) {
                 if (BS_ENABLE && selectedClient) {
                     try {
                         if (files.length > 0) {
-                            console.log('Posting with media:', text);  // メディアありの投稿ログ
-                            // メディアファイルが存在する場合、moderationLabelを指定して投稿
+                            console.log('Posting with media:', selectedText);  // メディアありの投稿ログ
                             selectedClient.post(selectedText, filesBuffer, moderationLabel);
                         } else {
-                            console.log('Posting without media:', text);  // メディアなしの投稿ログ
-                            // メディアファイルが存在しない場合、moderationLabelを指定せずに投稿
+                            console.log('Posting without media:', selectedText);  // メディアなしの投稿ログ
                             selectedClient.post(selectedText, null, null);
                         }
-                        console.log('Post successfully made to Bluesky:', text);  // 成功時のログ
+                        console.log('Post successfully made to Bluesky:', selectedText);  // 成功時のログ
                     } catch (error) {
                         console.error("Error during posting to Bluesky:", error);
                     }
