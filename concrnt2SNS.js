@@ -1,4 +1,3 @@
-require('dotenv').config();
 const cc = require('@concurrent-world/client');
 const ImageResize = require('./Image.js');
 const Twitter = require('./Twitter.js');
