@@ -18,11 +18,7 @@ BS_SERVICE="BlueskyのサーバーURL https://bsky.social　とか"
 CC_SUBKEY="コンカレのサブキー"
 LISTEN_TIMELINE="ホーム以外のタイムラインを指定したい場合はID@host形式で1つ指定"
 
-# テスト用のBlueskyアカウント設定
-BS_IDENTIFIER_DEV=
-BS_APP_PASSWORD_DEV=
-
-# 通常のBlueskyアカウント設定
+#Blueskyアカウント設定
 BS_IDENTIFIER_0=
 BS_APP_PASSWORD_0=
 
@@ -32,26 +28,19 @@ BS_APP_PASSWORD_1=
 BS_IDENTIFIER_2=
 BS_APP_PASSWORD_2=
 
-# Blueskyアカウントの数
-BS_ACCOUNT_COUNT=3
+# タイムライン、Blueskyアカウント、内容を定型文で置き換え
 
-# ストリーム、Blueskyアカウント、テキストの紐付け
-STREAM_0="LISTEN_TIMELINEに加えてここで指定したID@host形式のタイムラインが含まれる場合に投稿先の切替やテキストの置き換えなどが出来る"
+# 転送元投稿の投稿先がLISTEN_TIMELINEに加えここで指定したタイムラインが含まれる場合に投稿先の切替やテキストの置き換えなどが出来る
+TIMELINE_0="abc@example.com"
+# どのBlueskyアカウントに転送するか
 BS_ACCOUNT_0=0
-OVERRIDE_TEXT_0="Bluesky特有の定型文やハッシュタグで画像付き投稿のテキストを置き換える場合に指定"
-MODERATION_LABEL_0="" # porn,sexual,nudity,nsfl,gore から、このアカウントの画像投稿に対するラベルを指定
+# Bluesky特有の定型文やハッシュタグで画像付き投稿のテキストを置き換える場合に指定（オプション）
+OVERRIDE_TEXT_0="ぶすかいごはん部"
+# porn,sexual,nudity,nsfl,gore から、このアカウントの画像投稿に対するラベルを指定（オプション）
+MODERATION_LABEL_0=""
 
-STREAM_1=
+TIMELINE_1=
 BS_ACCOUNT_1=1
-
-STREAM_DEV_0=
-BS_ACCOUNT_DEV_0=DEV
-
-STREAM_DEV_1=
-BS_ACCOUNT_DEV_1=DEV
-
-# 環境設定
-NODE_ENV=production
 ```
 4. `npm start`で多分動く！！
 
