@@ -10,7 +10,7 @@ class AtProtocol {
         })
 
         this.agent.login({
-            identifier: Identifier,
+            identifier: identifier,
             password: appPassword
         }).then(res => {
             console.log(`BS Login : ${res}`)
@@ -34,7 +34,7 @@ class AtProtocol {
             text: text
         })
         await rt.detectFacets(this.agent)
-
+    
         let record = {
             text: rt.text,
             facets: rt.facets,
@@ -47,9 +47,18 @@ class AtProtocol {
         if (medias != undefined) {
             record.embed = medias
         }
-
+    
+        // labelが存在し、かつ文字列である場合のみself-labelを追加
+        if (label && typeof label === 'string') {
+            record.labels = {
+                $type: 'com.atproto.label.defs#selfLabels',
+                values: [{ val: label }]
+            };
+        }
+    
         await this.agent.post(record)
     }
+    
 
     async uploadMedia(filesBuffer) {
         //Blueskyは動画1つだけ、かつ1ファイル50MBまでアップできる
@@ -215,3 +224,4 @@ class AtProtocol {
 }
 
 module.exports = AtProtocol
+
