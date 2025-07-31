@@ -1,60 +1,81 @@
 import { Client } from '@concrnt/worldlib'
 import Media from './Utils/Media.js'
-import Twitter from './Clients/Twitter.js'
-import AtProtocol from './Clients/AtProtocol.js'
-import Threads from './Clients/Threads.js'
-import Nostr from './Clients/Nostr.js'
+import AccountManager from './Utils/AccountManager.js'
 import CCMsgAnalysis from './Utils/ConcrntMessageAnalysis.js'
 
 const CC_SUBKEY = process.env.CC_SUBKEY
-
-const TW_ENABLE = process.env.TW_ENABLE == "true"
-const TW_API_KEY = process.env.TW_API_KEY
-const TW_API_KEY_SECRET = process.env.TW_API_KEY_SECRET
-const TW_ACCESS_TOKEN = process.env.TW_ACCESS_TOKEN
-const TW_ACCESS_TOKEN_SECRET = process.env.TW_ACCESS_TOKEN_SECRET
-const TW_WEBHOOK_URL = process.env.TW_WEBHOOK_URL
-const TW_WEBHOOK_IMAGE_URL = process.env.TW_WEBHOOK_IMAGE_URL
-
-const BS_ENABLE = process.env.BS_ENABLE == "true"
-const BS_IDENTIFIER = process.env.BS_IDENTIFIER
-const BS_APP_PASSWORD = process.env.BS_APP_PASSWORD
-const BS_SERVICE = process.env.BS_SERVICE
-
-const THREADS_ENABLE = process.env.THREADS_ENABLE == "true"
-const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN
-
-const NOSTR_ENABLE = process.env.NOSTR_ENABLE == "true"
-const NOSTR_PRIVATE_KEY = process.env.NOSTR_PRIVATE_KEY
-const NOSTR_RELAYS = process.env.NOSTR_RELAYS
-
 const LISTEN_TIMELINE = process.env.LISTEN_TIMELINE
+const DRY_RUN = process.env.DRY_RUN === "true"
 
 const media = new Media()
 const ccClient = await Client.createFromSubkey(CC_SUBKEY)
-const twitterClient = TW_ENABLE && new Twitter(TW_API_KEY, TW_API_KEY_SECRET, TW_ACCESS_TOKEN, TW_ACCESS_TOKEN_SECRET, TW_WEBHOOK_URL, TW_WEBHOOK_IMAGE_URL)
-const bskyClient = BS_ENABLE && await AtProtocol.build(BS_SERVICE, BS_IDENTIFIER, BS_APP_PASSWORD)
-const threadsClient = THREADS_ENABLE && await Threads.create(THREADS_ACCESS_TOKEN)
-const nosterClient = NOSTR_ENABLE && new Nostr(NOSTR_RELAYS, NOSTR_PRIVATE_KEY)
+const accountManager = new AccountManager()
+await accountManager.initialize()
 const ccMsgAnalysis = new CCMsgAnalysis()
 
+// 重複投稿を防ぐためのセット（メッセージIDを最大100件保持）
+const recentMessageIds = new Set()
+const MAX_RECENT_MESSAGES = 100
+
 async function start() {
+    if (DRY_RUN) {
+        console.log('🔍 DRY RUN MODE ENABLED - No actual posts will be made')
+    }
+    
     const subscription = await ccClient.newSocketListener()
     const listenTimeline = LISTEN_TIMELINE || ccClient.user.homeTimeline
+    
+    // 監視するタイムラインのリストを作成
+    const timelinesToListen = accountManager.getAllTimelinesToListen()
+    if (!timelinesToListen.includes(listenTimeline)) {
+        timelinesToListen.push(listenTimeline)
+    }
+    
+    console.log('Listening to timelines:', timelinesToListen)
 
     subscription.on('MessageCreated', (message) => {
         const document = message.parsedDoc
         if (document.signer != ccClient.ccid) {
             return
         }
-        receivedPost(document)
+        
+        // メッセージIDを取得
+        const messageId = message.resource?.id || message.item?.resourceID
+        
+        // どのタイムラインからのメッセージかを判別
+        const messageTimeline = message.timeline
+        
+        if (DRY_RUN) {
+            console.log(`\nMessage from timeline: ${messageTimeline}`)
+            console.log(`Message ID: ${messageId}`)
+        }
+        
+        receivedPost(document, messageTimeline, messageId)
     })
 
-    subscription.listen([listenTimeline])
+    subscription.listen(timelinesToListen)
 }
 
-function receivedPost(document) {
+function receivedPost(document, messageTimeline, messageId) {
     if (document.schema == "https://schema.concrnt.world/m/markdown.json" || document.schema == "https://schema.concrnt.world/m/media.json") {
+        // 重複チェック
+        if (!messageId) {
+            console.log('Warning: Message ID is undefined')
+            return
+        }
+        if (recentMessageIds.has(messageId)) {
+            console.log(`重複メッセージをスキップ: ${messageId}`)
+            return
+        }
+        
+        // メッセージIDを記録
+        recentMessageIds.add(messageId)
+        // 古いIDを削除（メモリ管理）
+        if (recentMessageIds.size > MAX_RECENT_MESSAGES) {
+            const firstId = recentMessageIds.values().next().value
+            recentMessageIds.delete(firstId)
+        }
+        
         const body = document.body.body
         const text = ccMsgAnalysis.getPlaneText(body)
         const urls = ccMsgAnalysis.getURLs(text)
@@ -70,10 +91,73 @@ function receivedPost(document) {
 
         if (text.length > 0 || files.length > 0) {
             media.downloader(files).then(filesBuffer => {
-                if (TW_ENABLE) twitterClient.tweet(text, filesBuffer)
-                if (BS_ENABLE) bskyClient.post(text, urls, filesBuffer, ccClient)
-                if (THREADS_ENABLE) threadsClient.post(text, filesBuffer)
-                if (NOSTR_ENABLE) nosterClient.post(text, filesBuffer)
+                const clients = accountManager.getClientsForTimeline(messageTimeline)
+                
+                if (DRY_RUN) {
+                    // ドライランモード
+                    console.log('\n=== DRY RUN MODE ===')
+                    console.log('Text:', text)
+                    console.log('Files:', filesBuffer.length)
+                    console.log('URLs:', urls)
+                    console.log('Timeline:', messageTimeline)
+                    console.log('Target platforms:')
+                    
+                    for (const [platform, platformClients] of Object.entries(clients)) {
+                        if (Array.isArray(platformClients)) {
+                            console.log(`  - ${platform}: ${platformClients.length} account(s)`)
+                        } else if (platformClients) {
+                            console.log(`  - ${platform}`)
+                        }
+                    }
+                    console.log('===================\n')
+                } else {
+                    // 実際の投稿
+                    console.log(`タイムライン ${messageTimeline} からの投稿: ${messageId}`)
+                    
+                    // Twitter
+                    if (clients.twitter) {
+                        if (Array.isArray(clients.twitter)) {
+                            for (const client of clients.twitter) {
+                                client.tweet(text, filesBuffer)
+                            }
+                        } else {
+                            clients.twitter.tweet(text, filesBuffer)
+                        }
+                    }
+                    
+                    // Bluesky
+                    if (clients.bluesky) {
+                        if (Array.isArray(clients.bluesky)) {
+                            for (const client of clients.bluesky) {
+                                client.post(text, urls, filesBuffer, ccClient)
+                            }
+                        } else {
+                            clients.bluesky.post(text, urls, filesBuffer, ccClient)
+                        }
+                    }
+                    
+                    // Threads
+                    if (clients.threads) {
+                        if (Array.isArray(clients.threads)) {
+                            for (const client of clients.threads) {
+                                client.post(text, filesBuffer)
+                            }
+                        } else {
+                            clients.threads.post(text, filesBuffer)
+                        }
+                    }
+                    
+                    // Nostr
+                    if (clients.nostr) {
+                        if (Array.isArray(clients.nostr)) {
+                            for (const client of clients.nostr) {
+                                client.post(text, filesBuffer)
+                            }
+                        } else {
+                            clients.nostr.post(text, filesBuffer)
+                        }
+                    }
+                }
             })
         }
     }

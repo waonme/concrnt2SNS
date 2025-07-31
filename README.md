@@ -27,8 +27,26 @@ CC_SUBKEY="コンカレのサブキー"
 LISTEN_TIMELINE="ホーム以外のタイムラインを指定したい場合はID@host形式で1つ指定"
 
 // Option（使わない場合は入れないこと）
+LISTEN_TIMELINE_TW="Twitter専用のタイムライン。TW_ENABLEの設定に関わらずTwitterのみに投稿される（ID@host形式）"
 TW_WEBHOOK_URL="メディアなしのTweetをIFTTT経由で行う場合のWebHookURL"
 TW_WEBHOOK_IMAGE_URL="1枚だけ画像ありのTweetをIFTTT経由で行う場合のWebHookURL"
+
+// 複数アカウント設定（例）
+TWITTER_ACCOUNT1_API_KEY="別のTwitterアカウントのAPI_KEY"
+TWITTER_ACCOUNT1_API_KEY_SECRET="別のTwitterアカウントのAPI_KEY_SECRET"
+TWITTER_ACCOUNT1_ACCESS_TOKEN="別のTwitterアカウントのACCESS_TOKEN"
+TWITTER_ACCOUNT1_ACCESS_TOKEN_SECRET="別のTwitterアカウントのACCESS_TOKEN_SECRET"
+
+BLUESKY_ACCOUNT1_IDENTIFIER="別のBlueskyアカウントのIDENTIFIER"
+BLUESKY_ACCOUNT1_APP_PASSWORD="別のBlueskyアカウントのAPP_PASSWORD"
+BLUESKY_ACCOUNT1_SERVICE="https://bsky.social"
+
+// タイムライン別投稿設定（例）
+TIMELINE_1_ID="tjr6xhdgy2n2m2cm30687w9zw2c@arakoshi.com"
+TIMELINE_1_TARGETS="twitter:account1,bluesky:account1"
+
+TIMELINE_2_ID="another-timeline-id@host.com"
+TIMELINE_2_TARGETS="twitter:default,bluesky:default,threads:default"
 ```
 
 4. `npm start`で多分動く！！

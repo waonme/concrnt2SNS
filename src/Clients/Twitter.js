@@ -11,24 +11,32 @@ class Twitter {
     sleep = (time) => new Promise((resolve) => setTimeout(resolve, time))
 
     constructor(apiKey, apiKeySecret, token, tokenSecret, webhookURL, webhookURLImage) {
-        this.twitterClient = new TwitterApi({
-            appKey: apiKey,
-            appSecret: apiKeySecret,
-            accessToken: token,
-            accessSecret: tokenSecret,
-        })
+        // API認証情報がすべて揃っている場合のみTwitterApiインスタンスを作成
+        if (apiKey && apiKeySecret && token && tokenSecret) {
+            this.twitterClient = new TwitterApi({
+                appKey: apiKey,
+                appSecret: apiKeySecret,
+                accessToken: token,
+                accessSecret: tokenSecret,
+            })
+        } else {
+            this.twitterClient = null
+        }
 
         this.webhookURL = webhookURL
         this.tweetAtWebHookImage = webhookURLImage
     }
 
     async tweet(text, filesBuffer) {
+        console.log('Twitter.tweet called with:', { text: text.substring(0, 50), filesCount: filesBuffer.length })
+        
         // YoutubeMusicはwatchだけOGPが出ないのでYoutubeに置き換える
         text = text.replace(/https:\/\/music\.youtube\.com\/watch/g, 'https://youtube.com/watch')
         const payload = {
             text: text
         }
         const isMediaFlag = filesBuffer.some(item => item.flag !== undefined)
+        console.log('isMediaFlag:', isMediaFlag, 'webhookURL:', this.webhookURL, 'tweetAtWebHookImage:', this.tweetAtWebHookImage)
         try {
             if (filesBuffer.length == 1 && filesBuffer[0].type == "image/jpeg" && this.tweetAtWebHookImage && !isMediaFlag) {
                 await this.tweetAtWebHook(this.tweetAtWebHookImage, text, filesBuffer[0].url)
@@ -37,17 +45,26 @@ class Twitter {
                 const mediaIds = await this.uploadMedia(filesBuffer)
                 if (mediaIds.length > 0) payload.media = { media_ids: mediaIds }
             } else if (this.webhookURL != undefined) {
+                console.log('Using webhook for text-only tweet')
                 await this.tweetAtWebHook(this.webhookURL, text)
                 return
             }
             
-            await this.twitterClient.v2.tweet(payload)
+            if (this.twitterClient) {
+                await this.twitterClient.v2.tweet(payload)
+            } else {
+                console.log('Twitter API credentials not configured. Cannot tweet without webhook.')
+            }
         } catch (error) {
             console.error(error)
         }
     }
 
     async uploadMedia(filesBuffer) {
+        if (!this.twitterClient) {
+            console.log('Twitter API credentials not configured. Cannot upload media.')
+            return []
+        }
         const ids = await Promise.all(filesBuffer.map(async (file) => {
             let retryCount = 0
 
@@ -80,6 +97,7 @@ class Twitter {
     }
 
     async tweetAtWebHook(url, text, imageURL = undefined) {
+        console.log('tweetAtWebHook called with:', { url, textLength: text.length, hasImage: !!imageURL })
         let data = {
             "value1": text,
             "value2": imageURL
@@ -94,10 +112,12 @@ class Twitter {
         }
 
         try {
-            await axios(config)
+            const response = await axios(config)
+            console.log('Webhook response:', response.status, response.statusText)
         } catch (error) {
-            const responseStatus = error.response.status
+            const responseStatus = error.response?.status
             console.error(`Failed to tweet on WebHook. code:${responseStatus}`)
+            console.error('Error details:', error.message)
             throw error
         }
     }
