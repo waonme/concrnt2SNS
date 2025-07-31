@@ -133,3 +133,8 @@ env.js
 
 # test
 test.js
+
+# Claude AI
+.claude/
+CLAUDE.md
+GEMINI.md

@@ -102,3 +102,35 @@ IFTTTでこいういうAppletを作ってWebHookのURLを`TW_WEBHOOK_URL`と`TW_
 
 ![image](https://github.com/user-attachments/assets/6271c892-2db6-4bf5-8c17-f7f7bb56e33c)
 ![image](https://github.com/user-attachments/assets/27ed9a51-d20b-4786-b3ac-5354b4aa76c7)
+
+## AIコーディングエージェントを使用する開発者の方へ
+
+このリポジトリでは、ClaudeやGeminiのようなAIエージェントが、プロジェクトの概要や構造を理解しやすくするためのエージェント向け文書（プロンプト）を用意しています。
+
+これらを使用するためには、プロジェクトのルートディレクトリに各エージェント向けの設定ファイルを作成し、明示的に読み込む必要があります。
+
+### セットアップ手順:
+
+1. プロジェクトのルートに `CLAUDE.md` や `GEMINI.md` ファイルを作成します。
+
+2. `CLAUDE.md` に以下の行を追加して、リポジトリが推奨するプロンプトをインポートします：
+
+```
+@./.ai/claude.prompt.md
+```
+
+3. Geminiの場合は `GEMINI.md` に以下を追加します：
+
+```
+@./.ai/gemini.prompt.md
+```
+
+4. インポートした行の後に、必要な指示を適宜追加してください（例：`Always respond in Japanese.`）。
+
+### プロンプトファイルの構造
+
+`.ai/` ディレクトリには以下のファイルが含まれています：
+- `claude.prompt.md` / `gemini.prompt.md`: 各AIエージェント用のエントリーポイント
+- `context/overview.md`: プロジェクトの詳細な概要と開発ガイド
+
+このアプローチにより、共有されたプロジェクトのコンテキストを活用しつつ、エージェントに与える指示を各ユーザーが自由に制御できます。`CLAUDE.md` と `GEMINI.md` はすでに `.gitignore` に記載されているため、リポジトリにコミットされることはありません。
