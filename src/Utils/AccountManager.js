@@ -75,12 +75,28 @@ export default class AccountManager {
         const envKeys = Object.keys(process.env)
         
         // Twitter accounts
-        const twitterAccounts = envKeys.filter(key => key.match(/^TWITTER_ACCOUNT(\d+)_API_KEY$/))
-        for (const keyMatch of twitterAccounts) {
-            const accountNum = keyMatch.match(/ACCOUNT(\d+)/)[1]
+        const twitterAccounts = envKeys.filter(key => key.match(/^TWITTER_ACCOUNT(\d+)_/))
+        const accountNumbers = new Set()
+        for (const key of twitterAccounts) {
+            const match = key.match(/ACCOUNT(\d+)/)
+            if (match) accountNumbers.add(match[1])
+        }
+        
+        for (const accountNum of accountNumbers) {
             const prefix = `TWITTER_ACCOUNT${accountNum}_`
             
-            if (process.env[prefix + 'API_KEY'] && 
+            // IFTTT Webhook専用アカウント（API認証情報なし）
+            if (process.env[prefix + 'WEBHOOK_URL'] && 
+                !process.env[prefix + 'API_KEY']) {
+                const client = new Twitter(
+                    null, null, null, null,
+                    process.env[prefix + 'WEBHOOK_URL'],
+                    process.env[prefix + 'WEBHOOK_IMAGE_URL']
+                )
+                this.accounts.twitter[`account${accountNum}`] = client
+            }
+            // 通常のAPIアカウント
+            else if (process.env[prefix + 'API_KEY'] && 
                 process.env[prefix + 'API_KEY_SECRET'] &&
                 process.env[prefix + 'ACCESS_TOKEN'] &&
                 process.env[prefix + 'ACCESS_TOKEN_SECRET']) {
