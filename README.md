@@ -134,3 +134,5 @@ IFTTTでこいういうAppletを作ってWebHookのURLを`TW_WEBHOOK_URL`と`TW_
 - `context/overview.md`: プロジェクトの詳細な概要と開発ガイド
 
 このアプローチにより、共有されたプロジェクトのコンテキストを活用しつつ、エージェントに与える指示を各ユーザーが自由に制御できます。`CLAUDE.md` と `GEMINI.md` はすでに `.gitignore` に記載されているため、リポジトリにコミットされることはありません。
+
+*AIエージェント向け文書の構造は[kohya-ss/musubi-tuner](https://github.com/kohya-ss/musubi-tuner)を参考にしました。*
