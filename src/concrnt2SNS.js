@@ -45,6 +45,12 @@ async function start() {
         // どのタイムラインからのメッセージかを判別
         const messageTimeline = message.timeline
         
+        // プロフィール情報をデバッグ出力
+        console.log('\n=== Message Debug Info ===')
+        console.log('Full message structure:', JSON.stringify(message, null, 2).substring(0, 500))
+        console.log('Document:', JSON.stringify(document, null, 2).substring(0, 500))
+        console.log('========================\n')
+        
         if (DRY_RUN) {
             console.log(`\nMessage from timeline: ${messageTimeline}`)
             console.log(`Message ID: ${messageId}`)
@@ -91,12 +97,54 @@ function receivedPost(document, messageTimeline, messageId) {
 
         if (text.length > 0 || files.length > 0) {
             media.downloader(files).then(filesBuffer => {
-                const clients = accountManager.getClientsForTimeline(messageTimeline)
+                let clients = accountManager.getClientsForTimeline(messageTimeline)
+                
+                // ハッシュタグベースの転送チェック
+                const envKeys = Object.keys(process.env)
+                const hashtagKeys = envKeys.filter(key => key.match(/^HASHTAG_(\d+)_TRIGGER$/))
+                const detectedHashtags = []
+                
+                for (const keyMatch of hashtagKeys) {
+                    const num = keyMatch.match(/HASHTAG_(\d+)_TRIGGER/)[1]
+                    const hashtagTrigger = process.env[`HASHTAG_${num}_TRIGGER`]
+                    const hashtagTargets = process.env[`HASHTAG_${num}_TARGETS`]
+                    
+                    if (hashtagTrigger && hashtagTargets && text.includes(hashtagTrigger)) {
+                        console.log(`ハッシュタグ ${hashtagTrigger} を検出、指定されたアカウントに転送します`)
+                        detectedHashtags.push(hashtagTrigger)
+                        
+                        // ハッシュタグベースのクライアントを追加
+                        const targetList = hashtagTargets.split(',')
+                        for (const target of targetList) {
+                            const [platform, accountName] = target.split(':')
+                            const account = accountManager.accounts[platform]?.[accountName || 'default']
+                            if (account) {
+                                if (!clients[platform]) clients[platform] = []
+                                if (Array.isArray(clients[platform])) {
+                                    // 重複チェック
+                                    if (!clients[platform].includes(account)) {
+                                        clients[platform].push(account)
+                                    }
+                                } else {
+                                    // 単一クライアントの場合は配列に変換
+                                    clients[platform] = [clients[platform], account]
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // ハッシュタグを削除したテキストを準備
+                let cleanText = text
+                for (const hashtag of detectedHashtags) {
+                    cleanText = cleanText.replace(hashtag, '').trim()
+                }
                 
                 if (DRY_RUN) {
                     // ドライランモード
                     console.log('\n=== DRY RUN MODE ===')
-                    console.log('Text:', text)
+                    console.log('Original Text:', text)
+                    console.log('Clean Text:', cleanText)
                     console.log('Files:', filesBuffer.length)
                     console.log('URLs:', urls)
                     console.log('Timeline:', messageTimeline)
@@ -118,10 +166,10 @@ function receivedPost(document, messageTimeline, messageId) {
                     if (clients.twitter) {
                         if (Array.isArray(clients.twitter)) {
                             for (const client of clients.twitter) {
-                                client.tweet(text, filesBuffer)
+                                client.tweet(cleanText, filesBuffer)
                             }
                         } else {
-                            clients.twitter.tweet(text, filesBuffer)
+                            clients.twitter.tweet(cleanText, filesBuffer)
                         }
                     }
                     
@@ -129,10 +177,10 @@ function receivedPost(document, messageTimeline, messageId) {
                     if (clients.bluesky) {
                         if (Array.isArray(clients.bluesky)) {
                             for (const client of clients.bluesky) {
-                                client.post(text, urls, filesBuffer, ccClient)
+                                client.post(cleanText, urls, filesBuffer, ccClient)
                             }
                         } else {
-                            clients.bluesky.post(text, urls, filesBuffer, ccClient)
+                            clients.bluesky.post(cleanText, urls, filesBuffer, ccClient)
                         }
                     }
                     
@@ -140,10 +188,10 @@ function receivedPost(document, messageTimeline, messageId) {
                     if (clients.threads) {
                         if (Array.isArray(clients.threads)) {
                             for (const client of clients.threads) {
-                                client.post(text, filesBuffer)
+                                client.post(cleanText, filesBuffer)
                             }
                         } else {
-                            clients.threads.post(text, filesBuffer)
+                            clients.threads.post(cleanText, filesBuffer)
                         }
                     }
                     
@@ -151,10 +199,10 @@ function receivedPost(document, messageTimeline, messageId) {
                     if (clients.nostr) {
                         if (Array.isArray(clients.nostr)) {
                             for (const client of clients.nostr) {
-                                client.post(text, filesBuffer)
+                                client.publish(cleanText, filesBuffer)
                             }
                         } else {
-                            clients.nostr.post(text, filesBuffer)
+                            clients.nostr.publish(cleanText, filesBuffer)
                         }
                     }
                 }
