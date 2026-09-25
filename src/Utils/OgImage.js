@@ -1,34 +1,73 @@
 import sharp from "sharp";
 import MetaTagExtractor from './MetaTagExtractor.js';
+import { fetchPreviewBytes } from './PreviewFetch.js';
 
 const GOOGLE_FAVICON_URL = "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=256&url="
+const MAX_IMAGE_ATTEMPTS = 3
+const PREVIEW_TIMEOUT_MS = 8000
 
 class OgImage {
   static async getOgImage(url, ccClient = undefined) {
+    const signal = AbortSignal.timeout(PREVIEW_TIMEOUT_MS)
     try {
-      const { ogImageUrl, title, description } = await this.getOgp(url, ccClient)
-      const ogImage = ogImageUrl ? await this.getImage(ogImageUrl) : undefined
+      const metadata = await this.getOgp(url, ccClient, signal)
+      const attempted = new Set()
+      const tryImages = async candidates => {
+        for (const candidate of candidates) {
+          if (signal.aborted || attempted.size >= MAX_IMAGE_ATTEMPTS) break
+          const imageUrl = this.resolveImageUrl(candidate, url)
+          if (!imageUrl || attempted.has(imageUrl)) continue
+          attempted.add(imageUrl)
+          const bytes = await this.getImage(imageUrl, signal)
+          if (bytes) return { imageUrl, bytes }
+        }
+      }
+
+      let image = await tryImages(metadata.imageUrls)
+      if (!image && metadata.fromSummary && !signal.aborted) {
+        // Fetch HTML only after the preferred summary image failed.
+        const page = await this.getPageOgp(url, signal)
+        image = await tryImages(page.imageUrls)
+        metadata.title ||= page.title
+        metadata.description ||= page.description
+      }
 
       return {
-        imageUrl: ogImageUrl,
+        imageUrl: image?.imageUrl || metadata.ogImageUrl,
         type: "image/jpeg",
         url: url,
-        description: description,
-        title: title,
-        uint8Array: new Uint8Array(ogImage),
+        description: metadata.description,
+        title: metadata.title,
+        uint8Array: new Uint8Array(image?.bytes),
       }
-    } catch (e) {
-      console.error(e)
+    } catch {
+      console.warn('Link preview: metadata unavailable')
       return undefined
     }
   }
 
-  static async getImage(ogImageUrl) {
+  static resolveImageUrl(candidate, pageUrl) {
+    if (typeof candidate !== 'string' || !candidate.trim()) return undefined
     try {
-      const res = await fetch(ogImageUrl)
-      const buffer = await res.arrayBuffer()
+      const resolved = new URL(candidate, pageUrl)
+      return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : undefined
+    } catch {
+      return undefined
+    }
+  }
 
-      return await sharp(buffer)
+  static async getImage(ogImageUrl, signal) {
+    try {
+      const { bytes, contentType } = await fetchPreviewBytes(ogImageUrl, {
+        signal,
+        maxBytes: 5 * 1024 * 1024,
+      })
+      const mimeType = contentType.split(';')[0].trim().toLowerCase()
+      if (mimeType && !mimeType.startsWith('image/') && mimeType !== 'application/octet-stream') {
+        throw new Error('Preview response is not an image')
+      }
+
+      return await sharp(bytes, { limitInputPixels: 40_000_000 })
         .resize(800, null, {
           fit: "inside",
           withoutEnlargement: true,
@@ -38,64 +77,67 @@ class OgImage {
           progressive: true,
         })
         .toBuffer()
-    } catch (e) {
-      console.error(e)
+    } catch {
+      console.warn('Link preview: image unavailable')
       return undefined
     }
   }
 
-  static async getOgp(url, ccClient = undefined) {
-    let ogImageUrl = ""
-    let title = ""
-    let description = ""
-    if (ccClient && "world.concrnt.hyperproxy.summary" in ccClient?.domainServices) {
+  static async getOgp(url, ccClient = undefined, signal) {
+    let title = ''
+    let description = ''
+    if (ccClient?.domainServices?.['world.concrnt.hyperproxy.summary']) {
       const summaryUrl = `https://${ccClient.host}${ccClient.domainServices['world.concrnt.hyperproxy.summary'].path}?url=${encodeURIComponent(url)}`
       try {
-        const res = await fetch(summaryUrl)
-        if (!res.ok) throw new Error(`Request failed with status ${res.status}`)
-        const data = await res.json()
-        if (data.thumbnail) { // thumbnailがあれば使う
-          ogImageUrl = data.thumbnail
-        } else if (data.icon.endsWith(".ico")) {  // faviconがico形式の場合は、GoogleのFavicon取得APIを使う
-          ogImageUrl = GOOGLE_FAVICON_URL + url
-        } else { // それ以外は、iconを使う
-          ogImageUrl = data.icon
+        const { bytes } = await fetchPreviewBytes(summaryUrl, { signal, maxBytes: 256 * 1024 })
+        const data = JSON.parse(bytes.toString('utf8'))
+        title = data.title || ''
+        description = data.description || ''
+        const ogImageUrl = data.thumbnail || (data.icon?.endsWith('.ico')
+          ? GOOGLE_FAVICON_URL + url : data.icon)
+        if (this.resolveImageUrl(ogImageUrl, url)) {
+          return {
+            ogImageUrl,
+            imageUrls: [ogImageUrl],
+            title,
+            description,
+            fromSummary: true,
+          }
         }
-        title = data.title
-        description = data.description
-      } catch (e) {
-        console.error(e)
+      } catch {
+        console.warn('Link preview: summary unavailable')
       }
     }
 
-    if (!ogImageUrl) { // ccClientがない場合や、ccClientのsummaryが取得できなかった場合は、MetaTagExtractorを使う
-      try {
-        const extractor = new MetaTagExtractor()
-        const meta = await extractor.extractMeta(url)
-        
-        if (this.isAmazonPrimeVideoURL(url)) {
-          // Prime VideoのURLの場合、OGP画像は取れないのでGoogle Faviconを使用
-          ogImageUrl = GOOGLE_FAVICON_URL + url
-        } else if (this.containsAmazonShortURL(url)) {
-          // Amazonの短縮URLの場合、imagesの中から特定のパターンを持つ画像を選ぶ
-          // https://zenn.dev/st43/scraps/f9940dbba495d3
-          const imageUrl = this.findTargetAmazonImageFromMeta(meta)
-          ogImageUrl = imageUrl || meta.images?.at(0) || GOOGLE_FAVICON_URL + url
-        } else {
-          ogImageUrl = meta.images?.at(0) ?? GOOGLE_FAVICON_URL + url
-        }
-        if (meta.og?.title || meta.title) title = meta.og?.title || meta.title
-        if (meta.og?.description || meta.description) description = meta.og?.description || meta.description
-      } catch (e) {
-        console.error(e)
-        ogImageUrl = GOOGLE_FAVICON_URL + url
-      }
-    }
-
+    const page = await this.getPageOgp(url, signal)
     return {
-      ogImageUrl: ogImageUrl,
-      title: title,
-      description: description,
+      ...page,
+      title: title || page.title,
+      description: description || page.description,
+    }
+  }
+
+  static async getPageOgp(url, signal) {
+    const faviconUrl = GOOGLE_FAVICON_URL + url
+    try {
+      const meta = await new MetaTagExtractor().extractMeta(url, { signal })
+      let imageUrls = meta.images || []
+      if (this.isAmazonPrimeVideoURL(url)) {
+        imageUrls = [faviconUrl]
+      } else if (this.containsAmazonShortURL(url)) {
+        const amazonImage = this.findTargetAmazonImageFromMeta(meta)
+        if (amazonImage) imageUrls = [amazonImage, ...imageUrls]
+      }
+      if (imageUrls.length === 0) imageUrls = [faviconUrl]
+
+      return {
+        ogImageUrl: imageUrls[0],
+        imageUrls,
+        title: meta.og?.title || meta.title || '',
+        description: meta.og?.description || meta.description || '',
+      }
+    } catch {
+      return { ogImageUrl: faviconUrl, imageUrls: [faviconUrl], title: '', description: '' }
     }
   }
 

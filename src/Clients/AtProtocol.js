@@ -66,10 +66,6 @@ class AtProtocol {
             record.embed = medias.embed
         } else if (ogImage != undefined) {
             record.embed = await this.uploadOgImage(ogImage)
-        } else {
-            record.embed = {
-                $type: 'app.bsky.feed.post'
-            }
         }
 
         if (flags.length > 0) {
@@ -83,10 +79,11 @@ class AtProtocol {
         }
 
         try {
-            await this.agent.post(record)
+            const result = await this.agent.post(record)
+            if (!result?.uri) throw new Error('Missing post URI')
+            return result
         } catch (error) {
-            console.error('AtProtocol:Failed to post')
-            console.error(error)
+            throw new Error('Bluesky delivery failed or is unconfirmed; check Bluesky before retrying')
         }
     }
 
