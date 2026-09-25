@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { fetchPreviewBytes } from './PreviewFetch.js';
 
 /**
  * MetaTagExtractor - OGP / Twitter Card / メタ情報抽出クラス
@@ -14,33 +15,20 @@ class MetaTagExtractor {
   /**
    * 指定されたURLからメタ情報を抽出
    * @param {string} url - 対象のURL
-   * @param {object} options - fetchのオプション (timeout, headers など)
+   * @param {object} options - fetchのオプション (signal, headers など)
    * @returns {Promise<object>} メタ情報オブジェクト
    */
   async extractMeta(url, options = {}) {
-    let timeoutId;
     try {
-      const timeout = options.timeout ?? 10000;
-      const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), timeout);
-
-      // fetch では maxRedirects は redirect: 'follow' (デフォルト) で処理され、細かい制限は標準では困難なため削除
-      const { timeout: _timeout, maxRedirects: _maxRedirects, ...fetchOptions } = options;
-
-      const defaultOptions = {
-        signal: controller.signal,
+      const { bytes } = await fetchPreviewBytes(url, {
+        ...options,
+        maxBytes: 1024 * 1024,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          ...options.headers,
         },
-        ...fetchOptions
-      };
-
-      const response = await fetch(url, defaultOptions);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const html = await response.text();
-      const $ = cheerio.load(html);
+      });
+      const $ = cheerio.load(bytes.toString('utf8'));
 
       // 基本情報の抽出
       const title = this._extractTitle($);
@@ -65,10 +53,8 @@ class MetaTagExtractor {
         images
       };
     } catch (error) {
-      console.error(`Error extracting meta from ${url}:`, error.message);
+      console.warn('Link preview: HTML metadata unavailable');
       throw error;
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 

@@ -12,18 +12,20 @@ const WARNING_LABEL = { 'porn': 'adult_content', 'hard': 'graphic_violence', 'nu
 class Twitter {
     sleep = (time) => new Promise((resolve) => setTimeout(resolve, time))
 
-    constructor(apiKey, apiKeySecret, token, tokenSecret, webhookURL, webhookURLImage, bufferToken, bufferChannelId) {
-        this.twitterClient = new TwitterApi({
+    constructor(apiKey, apiKeySecret, token, tokenSecret, webhookURL, webhookURLImage, bufferToken, bufferChannelId, sensitiveMediaPolicy, bufferFetch = fetch) {
+        this.twitterClient = apiKey && apiKeySecret && token && tokenSecret ? new TwitterApi({
             appKey: apiKey,
             appSecret: apiKeySecret,
             accessToken: token,
             accessSecret: tokenSecret,
-        })
+        }) : null
 
         this.webhookURL = webhookURL
         this.tweetAtWebHookImage = webhookURLImage
+        this.bufferFetch = bufferFetch
         this.bufferToken = bufferToken
         this.bufferChannelId = bufferChannelId
+        this.sensitiveMediaPolicy = sensitiveMediaPolicy
     }
 
     async tweet(text, filesBuffer) {
@@ -33,22 +35,35 @@ class Twitter {
             text: text
         }
         const isMediaFlag = filesBuffer.some(item => item.flag !== undefined)
+        if (filesBuffer.some(item => item.flag !== undefined && !Object.hasOwn(WARNING_LABEL, item.flag))) {
+            throw Object.assign(new Error('Unsupported media warning'), { code: 'BUFFER_UNSUPPORTED' })
+        }
+        // Buffer exposes no per-post warning. Only this explicitly opted-in
+        // account may rely on its owner-confirmed X account-wide media setting.
+        const bufferFlagsAllowed = !isMediaFlag || this.sensitiveMediaPolicy === 'account-sensitive'
 
         const isImagesOnly = filesBuffer.every(item => item.type && item.type.startsWith('image/'))
         const isVideoOnly = filesBuffer.length === 1 && filesBuffer[0].type && filesBuffer[0].type.startsWith('video/')
-        const canUseBuffer = this.bufferToken && this.bufferChannelId && !isMediaFlag &&
+        const canUseBuffer = this.bufferToken && this.bufferChannelId && bufferFlagsAllowed &&
             ((isImagesOnly && filesBuffer.length <= 4) || isVideoOnly)
 
         if (canUseBuffer) {
             const mediaURLs = filesBuffer.map(item => item.url)
             const mediaType = isVideoOnly ? 'video' : (mediaURLs.length > 0 ? 'image' : undefined)
             let bufferSuccess = false
-            for (let i = 0; i < MAX_BUFFER_RETRYS; i++) {
+            // A lost response can mean Buffer already accepted the post.
+            // Buffer-only mode must not blindly retry or use another transport.
+            const maxAttempts = this.twitterClient ? MAX_BUFFER_RETRYS : 1
+            for (let i = 0; i < maxAttempts; i++) {
                 try {
-                    await this.tweetAtBuffer(text, mediaURLs, mediaType)
+                    const result = await this.tweetAtBuffer(text, mediaURLs, mediaType)
                     bufferSuccess = true
-                    break
+                    return result
                 } catch (error) {
+                    if (error.code === 'BUFFER_RATE_LIMITED') throw error
+                    if (!this.twitterClient) {
+                        throw new Error('Buffer delivery failed or is unconfirmed; check Buffer before retrying')
+                    }
                     console.error(`Buffer attempt ${i + 1} failed:`, error.message || error)
 
                     let shouldRetry = true
@@ -66,12 +81,16 @@ class Twitter {
                         }
                     }
 
-                    if (!shouldRetry || i === MAX_BUFFER_RETRYS - 1) break
+                    if (!shouldRetry || i === maxAttempts - 1) break
                     await this.sleep(BUFFER_RETRY_DELAY)
                 }
             }
             if (bufferSuccess) return
             console.error(`Buffer failed, falling back...`)
+        }
+
+        if (!this.twitterClient && !this.webhookURL && !this.tweetAtWebHookImage) {
+            throw Object.assign(new Error('This post is not supported by the configured Buffer-only delivery'), { code: 'BUFFER_UNSUPPORTED' })
         }
 
         if (filesBuffer.length === 1 && filesBuffer[0].type === "image/jpeg" && this.tweetAtWebHookImage && !isMediaFlag) {
@@ -162,8 +181,8 @@ class Twitter {
         }`
 
         try {
-            const res = await fetch('https://api.buffer.com', {
-                method: 'POST',
+            const res = await this.bufferFetch('https://api.buffer.com', {
+                method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60000),
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.bufferToken}`
@@ -198,6 +217,10 @@ class Twitter {
                 error.response = { status: 200, data: responseData }
                 throw error
             }
+            if (!responseData?.data?.createPost?.post?.id) {
+                throw new Error('Buffer did not return a post ID')
+            }
+            return { providerPostID: responseData.data.createPost.post.id }
         } catch (error) {
             if (!error.response) {
                 error.response = { status: 500, data: error.message }
